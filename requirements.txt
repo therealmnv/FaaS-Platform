@@ -1,3 +1,5 @@
 redis
 fastapi
 uvicorn
+zmq
+dill
