@@ -13,7 +13,7 @@ def deserialize(obj: str):
     return dill.loads(codecs.decode(obj.encode(), "base64"))
 
 
-class PushWorkers:
+class PushWorker:
     def __init__(self, num_worker_processors, dispatcher_url):
         self.num_worker_processors = num_worker_processors
         self.address = dispatcher_url
@@ -51,5 +51,5 @@ if __name__ == "__main__":
     num_worker_processors = int(sys.argv[1])
     dispatcher_url = sys.argv[2]
 
-    workers = PushWorkers(num_worker_processors, dispatcher_url)
+    workers = PushWorker(num_worker_processors, dispatcher_url)
     workers.run()
