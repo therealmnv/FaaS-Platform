@@ -4,7 +4,7 @@ import argparse
 import dill
 import codecs
 import zmq
-import multiprocessing as mp
+import multiprocessing as mp # check for threading
 
 from database import *
 
@@ -37,14 +37,11 @@ class LocalDispatcher:
 
                 fn_payload = task["function_payload"]
                 param_payload = task["param_payload"]
-                pool.apply_async(self._execute_task, (task_id, fn_payload, param_payload,))
+                pool.apply_async(self._execute_task, (task_id, task, fn_payload, param_payload,))
 
 
-    def _execute_task(self, task_id, fn_payload, param_payload):
-
-        task_data = redis.hget('tasks', task_id)
-        task = json.loads(task_data)    
-
+    def _execute_task(self, task_id, task, fn_payload, param_payload):
+  
         task["status"] = RUNNING
         task_data = json.dumps(task)
         redis_client.hset('tasks', task_id, task_data)
@@ -162,12 +159,3 @@ if __name__ == "__main__":
             dispatcher = PushDispatcher(args.port)
 
     dispatcher.run()
-
-
-
-
-
-
-        
-
-    

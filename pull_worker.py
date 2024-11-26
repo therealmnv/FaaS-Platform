@@ -1,4 +1,4 @@
-import sys
+import argparse
 import zmq
 import multiprocessing as mp
 
@@ -37,15 +37,20 @@ class PullWorker:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        print("Please provide fields: <num_worker_processors> <dispatcher url>")
-        sys.exit(1)
 
-    num_worker_processors = int(sys.argv[1])
-    dispatcher_url = sys.argv[2]
-
-    workers = PullWorker(num_worker_processors, dispatcher_url)
-    workers.run()
-
-
+    parser = argparse.ArgumentParser(
+                        prog="pull_worker",
+                        description="Pull Worker for FAAS Project")
     
+    parser.add_argument("-p", "--port", required=True,
+                        type=int,
+                        help="Port to interact with task dispatcher")
+    
+    parser.add_argument("-w", "--num_worker_processors", required=True,
+                        type=int,
+                        help="Number of worker processors for worker")
+
+    args = parser.parse_args()
+
+    workers = PullWorker(args.num_worker_processors, args.dispatcher_url)
+    workers.run()
