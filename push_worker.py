@@ -31,13 +31,15 @@ class PushWorkers:
                 self._send_result(id, result)
 
     def _receive_task(self):
-        id, task = self.socket.recv_multipart()
-        task_str = task.decode('utf-8')
-        return id, task_str
+        id_bytes, data_bytes = self.socket.recv_multipart()
+        task_id = id_bytes.decode('utf-8')
+        task_data = data_bytes.decode('utf-8')
+        return task_id, task_data
     
-    def _send_result(self, id, result_str):
-        result = result_str.encode('utf-8')
-        self.socket.send_multipart([id, result])
+    def _send_result(self, task_id, task_result):
+        id_bytes = task_id.encode('utf-8')
+        result_bytes = task_result.encode('utf-8')
+        self.socket.send_multipart([id_bytes, result_bytes])
 
 
 

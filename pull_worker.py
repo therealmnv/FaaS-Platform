@@ -31,8 +31,8 @@ class PullWorkers:
                 result = serialize(result_obj)
 
     def _request_task(self, task_string):
-        self.socket.send_string(task_string)
-        response = self.socket.recv_string()
+        self.socket.send_string(task_string, encoding='utf-8')
+        response = self.socket.recv_string(encoding='utf-8')
         return response
 
 
