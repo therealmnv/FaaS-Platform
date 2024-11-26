@@ -8,6 +8,7 @@ import multiprocessing as mp
 
 from database import *
 
+TASKS='tasks'
 COMPLETE='COMPLETE'
 RUNNING='RUNNING'
 FAILED='FAILED'
@@ -27,12 +28,12 @@ class LocalDispatcher:
     
     def run(self):
         pubsub = redis_client.pubsub()
-        pubsub.subscribe('tasks')
+        pubsub.subscribe(TASKS)
 
         with mp.Pool(processes=self.num_worker_processors) as pool:
             while True:
                 task_id = pubsub.get_message()
-                task_data = redis_client.hget('tasks', task_id)      
+                task_data = redis_client.hget(TASKS, task_id)      
                 task = json.loads(task_data)  
 
                 fn_payload = task["function_payload"]
@@ -42,12 +43,12 @@ class LocalDispatcher:
 
     def _execute_task(self, task_id, fn_payload, param_payload):
 
-        task_data = redis.hget('tasks', task_id)
+        task_data = redis.hget(TASKS, task_id)
         task = json.loads(task_data)    
 
         task["status"] = RUNNING
         task_data = json.dumps(task)
-        redis_client.hset('tasks', task_id, task_data)
+        redis_client.hset(TASKS, task_id, task_data)
 
         fn = deserialize(fn_payload)
         param = deserialize(param_payload)
@@ -71,12 +72,25 @@ class PullDispatcher:
         pubsub = redis_client.pubsub()
         pubsub.subscribe('tasks')
         while True:
-            break
+            self._receive_result()
+            task_id = pubsub.get_message()
+            if task_id:
+                task_data = redis_client.hget(TASKS, task_id)
+                self._send_task(task_data)
 
-    def _receive_result(self):
-        pass
-    
-    def _send_task(self, data):
+    def _receive_result(self, task_id):
+        task_data = self.socket.recv_string()
+        if task_data == "START":
+            return
+        task = json.loads(task_data)
+        task["status"] = COMPLETE
+        task_data = json.dumps(task)
+
+        redis_client.hset(TASKS, task_id, task_data)
+        
+    def _send_task(self, task_data):
+        self.socket.send_string(task_data)
+
         pass
 
 
@@ -90,13 +104,33 @@ class PushDispatcher:
         pubsub = redis_client.pubsub()
         pubsub.subscribe('tasks')
         while True:
-            break
+            task_id = pubsub.get_message()
+            if task_id:
+                task_data = redis_client.hget(TASKS, task_id)
+                self._send_task(task_data)
+            self._receive_result(task_data)
 
-    def _send_task(self, data):
-        pass
+    def _send_task(self, task_id, task_data):
+        task = json.loads(task_data)
+        task["status"] = RUNNING
+        task_data = json.dumps(task)
+
+        redis_client.hset(TASKS, task_id, task_data)
+        data_bytes = task_data.encode('utf-8')
+        self.socket.send_multipart([task_id, data_bytes])
 
     def _receive_result(self):
-        pass
+        try:
+            task_id, data_bytes = self.socket.recv_multipart(flags=zmq.NOBLOCK)
+            task_data = data_bytes.decode('utf-8')
+
+            task = json.loads(task_data)
+            task["status"] = COMPLETE
+            task_data = json.dumps(task)
+
+            redis_client.hset(TASKS, task_id, task_data)
+        except zmq.Again:
+            return
 
 
 if __name__ == "__main__":

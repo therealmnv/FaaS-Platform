@@ -21,7 +21,7 @@ class PullWorkers:
         self.socket = context.socket(zmq.REQ)
 
     def run(self):
-        result = "" # Perhaps an indicator of 'Worker is on'
+        result = "START" # Perhaps an indicator of 'Worker is on'
         with mp.Pool(processes=self.num_worker_processors) as pool:
             while True:
                 task = self._request_task(result)
