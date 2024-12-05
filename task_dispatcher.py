@@ -1,5 +1,6 @@
 import sys
 import json
+import time
 import argparse
 import zmq
 import multiprocessing as mp # check for threading
@@ -40,11 +41,8 @@ class LocalDispatcher:
         task = json.loads(task_data)  
         fn_payload = task["function_payload"]
         param_payload = task["param_payload"]
-        print("function payload", fn_payload, flush=True)
-        print("param payload", param_payload, flush=True)
   
         task["status"] = RUNNING
-        print(task, flush=True)
         task_data = json.dumps(task)
         redis_client.hset('tasks', task_id, task_data)
 
@@ -65,27 +63,50 @@ class PullDispatcher:
         self.port = port
         context = zmq.Context()
         self.socket = context.socket(zmq.REP)
+        self.timeout = 120
 
     def run(self):
         pubsub = redis_client.pubsub()
         pubsub.subscribe('tasks')
+        task_id = None
+        start_time = None
         while True:
-            self._receive_result()
-            task_id = pubsub.get_message()
-            if task_id:
-                task_data = redis_client.hget('tasks', task_id)
-                self._send_task(task_data)
+            self._receive_result(task_id, start_time)
+            task = pubsub.get_message()
+            if task is None or task['type'] != 'message':
+                continue
+            task_id = task['data']
+            task_data = redis_client.hget('tasks', task_id)
+            if task_data is None:
+                continue
+            self._send_task(task_data)
+            start_time = time.time()
 
-    def _receive_result(self, task_id):
-        task_data = self.socket.recv_string()
+    def _receive_result(self, task_id, start_time):
+        task_data = self._receive_string(start_time)
+
         if task_data == "START":
             return
-        
-        task = json.loads(task_data)
-        task["status"] = COMPLETE
-        task_data = json.dumps(task)
+        elif task_data is None:
+            task = json.loads(task_data)
+            task["status"] = FAILED
+            task_data = json.dumps(task)        
+        else:
+            task = json.loads(task_data)
+            task["status"] = COMPLETE
+            task_data = json.dumps(task)
 
         redis_client.hset('tasks', task_id, task_data)
+
+    def _receive_string(self, start_time):
+        while True:
+            try:
+                string = self.socket.recv_string(flags=zmq.NOBLOCK)
+                return string
+            except zmq.Again:
+                if start_time and (time.time() - start_time) > self.timeout:
+                    return None
+
         
     def _send_task(self, task_data):
         self.socket.send_string(task_data)
@@ -101,11 +122,13 @@ class PushDispatcher:
         pubsub = redis_client.pubsub()
         pubsub.subscribe('tasks')
         while True:
-            task_id = pubsub.get_message()
-            if task_id:
+            task = pubsub.get_message()
+            if task and task['type'] == 'message':
+                task_id = task['data']
                 task_data = redis_client.hget('tasks', task_id)
-                self._send_task(task_data)
-            self._receive_result(task_data)
+                if task_data:
+                    self._send_task(task_id, task_data)
+            self._receive_result()
 
     def _send_task(self, task_id, task_data):
         task = json.loads(task_data)
@@ -114,8 +137,7 @@ class PushDispatcher:
 
         redis_client.hset('tasks', task_id, task_data)
         data_bytes = task_data.encode('utf-8')
-        id_bytes = task_id.encode('utf-8')
-        self.socket.send_multipart([id_bytes, data_bytes])
+        self.socket.send_multipart([task_id, data_bytes])
 
     def _receive_result(self):
         try:
