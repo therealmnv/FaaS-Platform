@@ -8,3 +8,4 @@ def serialize(obj) -> str:
 def deserialize(obj: str):
     return dill.loads(codecs.decode(obj.encode(), "base64"))
 
+
