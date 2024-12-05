@@ -18,7 +18,7 @@ class PushWorker:
                 id, task = self._receive_task()
                 task_object = deserialize(task)
                 params = eval(task_object.params)
-                result_obj = pool.apply(task_object.fn, (params,))
+                result_obj = pool.apply(task_object.fn, (params,)) # TODO: Add a try-except-finally block for handling exceptions
                 result = serialize(result_obj)
                 self._send_result(id, result)
 

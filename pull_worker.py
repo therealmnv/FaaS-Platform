@@ -16,10 +16,10 @@ class PullWorker:
         result = "START" # Perhaps an indicator of 'Worker is on'
         with mp.Pool(processes=self.num_worker_processors) as pool:
             while True:
-                task = self._request_task(result)
-                task_object = deserialize(task)
-                params = eval(task_object.params)
-                result_obj = pool.apply(task_object.fn, (params,))
+                task = self._request_task(result) # TODO: We must reset the result to "START" after an iteration in the while True? Otherwise it wouldn't request a task after the 1st iteration
+                task_object = deserialize(task) # TODO: shouldn't we use json loads here? If this works, let's not bother changing this
+                params = eval(task_object.params) 
+                result_obj = pool.apply(task_object.fn, (params,)) # TODO: Add a try-except-finally block for handling exceptions
                 result = serialize(result_obj)
 
     def _request_task(self, task_string):

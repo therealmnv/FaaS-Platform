@@ -49,13 +49,21 @@ class LocalDispatcher:
         fn = deserialize(fn_payload)
         param = deserialize(param_payload)
 
-        result = fn(param)
-        result_payload = serialize(result)
+        # TODO: redirect std out from the function as well to result?
 
-        task['status'] = COMPLETE
-        task['result'] = result_payload
-        task_data = json.dumps(task)
-        redis_client.hset('tasks', task_id, task_data)
+        try:
+            result = fn(param)
+            result_payload = serialize(result)
+            task['status'] = COMPLETE
+
+        except Exception as e:
+            result_payload = serialize(e)
+            task['status'] = FAILED
+
+        finally:
+            task['result'] = result_payload
+            task_data = json.dumps(task)
+            redis_client.hset('tasks', task_id, task_data)
 
 
 class PullDispatcher:
