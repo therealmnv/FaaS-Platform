@@ -62,6 +62,6 @@ def get_result(task_id: str):
 
     '''
     if result is None:
-        raise HTTPException(status_code=200, detail="Result not available yet", items = {"task_id" : "crap"})
+        raise HTTPException(status_code=200, detail="Result not available yet")
     '''
     return TaskResultRep(task_id=task_id, status=task_data["status"], result=str(result))

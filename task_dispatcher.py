@@ -40,19 +40,19 @@ class LocalDispatcher:
 
         task = json.loads(task_data)  
         fn_payload = task["function_payload"]
-        param_payload = task["param_payload"]
+        params_payload = task["param_payload"]
   
         task["status"] = RUNNING
         task_data = json.dumps(task)
         redis_client.hset('tasks', task_id, task_data)
 
         fn = deserialize(fn_payload)
-        param = deserialize(param_payload)
+        params = deserialize(params_payload)
 
         # TODO: redirect std out from the function as well to result?
 
         try:
-            result = fn(param)
+            result = fn(params)
             result_payload = serialize(result)
             task['status'] = COMPLETE
 
@@ -68,9 +68,9 @@ class LocalDispatcher:
 
 class PullDispatcher:
     def __init__(self, port):
-        self.port = port
         context = zmq.Context()
         self.socket = context.socket(zmq.REP)
+        self.socket.bind(f"tcp://127.0.0.1:{port}")
         self.timeout = 120
 
     def run(self):
@@ -87,7 +87,7 @@ class PullDispatcher:
             task_data = redis_client.hget('tasks', task_id)
             if task_data is None:
                 continue
-            self._send_task(task_data)
+            self._send_task(task_id, task_data)
             start_time = time.time()
 
     def _receive_result(self, task_id, start_time):
@@ -116,15 +116,21 @@ class PullDispatcher:
                     return None
 
         
-    def _send_task(self, task_data):
+    def _send_task(self, task_id, task_data):
         self.socket.send_string(task_data)
+        task_json = json.loads(task_data)
+        task_json["status"] = RUNNING
+        task_data = json.dumps(task_json)    
+        redis_client.hset('tasks', task_id, task_data)
+
 
 
 class PushDispatcher:
     def __init__(self, port):
         self.port = port
         context = zmq.Context()
-        self.socket = context.socket(zmq.DEALER)
+        self.socket = context.socket(zmq.ROUTER)
+        self.socket.bind(f"tcp://*:{port}")
 
     def run(self):
         pubsub = redis_client.pubsub()
@@ -152,9 +158,13 @@ class PushDispatcher:
             id_bytes, data_bytes = self.socket.recv_multipart(flags=zmq.NOBLOCK)
             task_id = id_bytes.decode('utf-8')
             task_data = data_bytes.decode('utf-8')
-
             task = json.loads(task_data)
-            task["status"] = COMPLETE
+
+            if deserialize(task['result']) is Exception:
+                task["status"] = FAILED    
+            else:
+                task["status"] = COMPLETE
+
             task_data = json.dumps(task)
 
             redis_client.hset('tasks', task_id, task_data)

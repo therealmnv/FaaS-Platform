@@ -1,6 +1,7 @@
 import argparse
 import zmq
 import multiprocessing as mp
+import json
 
 from serialize import *
 
@@ -8,25 +9,49 @@ from serialize import *
 class PushWorker:
     def __init__(self, num_worker_processors, dispatcher_url):
         self.num_worker_processors = num_worker_processors
-        self.address = dispatcher_url
         context = zmq.Context()
         self.socket = context.socket(zmq.ROUTER)
+        self.socket.connect(f"tcp://{dispatcher_url}")
+
 
     def run(self):
         with mp.Pool(processes=self.num_worker_processors) as pool:
             while True:
-                id, task = self._receive_task()
-                task_object = deserialize(task)
-                params = eval(task_object.params)
-                result_obj = pool.apply(task_object.fn, (params,)) # TODO: Add a try-except-finally block for handling exceptions
-                result = serialize(result_obj)
-                self._send_result(id, result)
+                task_id, task_data = self._receive_task()
+                if id:
+                    pool.apply_async(self._execute_function, ((task_id, task_data),))
+                # self._send_heartbeat()
+                
+
+
+    def _execute_function(self, task_id, task_data):
+        task_json = json.loads(task_data)
+        fn_payload = task_json["function_payload"]
+        params_payload = task_json["param_payload"]
+
+        fn = deserialize(fn_payload)
+        params = deserialize(params_payload)
+
+        try:
+            result_obj = fn(params)
+            result = serialize(result_obj)
+
+        except Exception as e:
+            result = serialize(e)
+
+        finally:
+            self._send_result(task_id, result)
 
     def _receive_task(self):
-        id_bytes, data_bytes = self.socket.recv_multipart()
-        task_id = id_bytes.decode('utf-8')
-        task_data = data_bytes.decode('utf-8')
-        return task_id, task_data
+        try:
+            id_bytes, data_bytes = self.socket.recv_multipart(flags=zmq.NOBLOCK)
+            task_id = id_bytes.decode('utf-8')
+            task_data = data_bytes.decode('utf-8')
+            return task_id, task_data
+
+        except zmq.Again:
+            return None, None
+
     
     def _send_result(self, task_id, task_result):
         id_bytes = task_id.encode('utf-8')
