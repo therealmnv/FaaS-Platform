@@ -1,3 +1,4 @@
+import concurrent.futures
 import sys
 import json
 import time
@@ -78,8 +79,9 @@ class PullDispatcher:
         pubsub.subscribe('tasks')
         task_id = None
         start_time = None
+
+        self.socket.recv_string()  # Start loop
         while True:
-            self._receive_result(task_id, start_time)
             task = pubsub.get_message()
             if task is None or task['type'] != 'message':
                 continue
@@ -89,20 +91,20 @@ class PullDispatcher:
                 continue
             self._send_task(task_id, task_data)
             start_time = time.time()
+            self._receive_result(task_id, task_data, start_time)
 
-    def _receive_result(self, task_id, start_time):
-        task_data = self._receive_string(start_time)
+    def _receive_result(self, task_id, task_data, start_time):
+        result_data = self._receive_string(start_time)
 
-        if task_data == "START":
-            return
-        elif task_data is None:
-            task = json.loads(task_data)
-            task["status"] = FAILED
-            task_data = json.dumps(task)        
+        task_json = json.loads(task_data)
+        
+        if result_data is None:
+            task_json["status"] = FAILED
         else:
-            task = json.loads(task_data)
-            task["status"] = COMPLETE
-            task_data = json.dumps(task)
+            task_json["status"] = COMPLETE
+            task_json["result"] = result_data
+
+        task_data = json.dumps(task_json)
 
         redis_client.hset('tasks', task_id, task_data)
 
@@ -110,6 +112,7 @@ class PullDispatcher:
         while True:
             try:
                 string = self.socket.recv_string(flags=zmq.NOBLOCK)
+                print("STRING", string)
                 return string
             except zmq.Again:
                 if start_time and (time.time() - start_time) > self.timeout:
@@ -117,7 +120,8 @@ class PullDispatcher:
 
         
     def _send_task(self, task_id, task_data):
-        self.socket.send_string(task_data)
+        print(task_data)
+        self.socket.send(task_data)
         task_json = json.loads(task_data)
         task_json["status"] = RUNNING
         task_data = json.dumps(task_json)    
@@ -130,46 +134,54 @@ class PushDispatcher:
         self.port = port
         context = zmq.Context()
         self.socket = context.socket(zmq.ROUTER)
-        self.socket.bind(f"tcp://*:{port}")
+        self.socket.bind(f"tcp://127.0.0.1:{port}")
 
     def run(self):
         pubsub = redis_client.pubsub()
         pubsub.subscribe('tasks')
-        while True:
-            task = pubsub.get_message()
-            if task and task['type'] == 'message':
-                task_id = task['data']
-                task_data = redis_client.hget('tasks', task_id)
-                if task_data:
-                    self._send_task(task_id, task_data)
-            self._receive_result()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            while True:
+                task = pubsub.get_message()
+                if task and task['type'] == 'message':
+                    task_id = task['data']
+                    task_data = redis_client.hget('tasks', task_id)
+                    if task_data:
+                        self._send_task(task_id, task_data)
+                self._receive_result(executor)
 
     def _send_task(self, task_id, task_data):
         task = json.loads(task_data)
         task["status"] = RUNNING
         task_data = json.dumps(task)
 
+        print(task)
+
         redis_client.hset('tasks', task_id, task_data)
-        data_bytes = task_data.encode('utf-8')
-        self.socket.send_multipart([task_id, data_bytes])
+        self.socket.send_string(task_id)
+        #self.socket.send_multipart([task_id, task_data.encode()])
+        print("SENT!")
 
-    def _receive_result(self):
-        try:
-            id_bytes, data_bytes = self.socket.recv_multipart(flags=zmq.NOBLOCK)
-            task_id = id_bytes.decode('utf-8')
-            task_data = data_bytes.decode('utf-8')
-            task = json.loads(task_data)
+    def _get_results(self):
+        return self.socket.recv_multipart()
 
-            if deserialize(task['result']) is Exception:
-                task["status"] = FAILED    
-            else:
-                task["status"] = COMPLETE
+    def _receive_result(self, executor):
+            future = executor.submit(self._get_results)
+            try:
+                [id_bytes, data_bytes] = future.result(timeout=1)
+                task_id = id_bytes.decode('utf-8')
+                task_data = data_bytes.decode('utf-8')
+                task = json.loads(task_data)
 
-            task_data = json.dumps(task)
+                if deserialize(task['result']) is Exception:
+                    task["status"] = FAILED    
+                else:
+                    task["status"] = COMPLETE
 
-            redis_client.hset('tasks', task_id, task_data)
-        except zmq.Again:
-            return
+                task_data = json.dumps(task)
+
+                redis_client.hset('tasks', task_id, task_data)
+            except concurrent.futures.TimeoutError:
+                return
 
 
 if __name__ == "__main__":

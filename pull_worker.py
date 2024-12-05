@@ -26,6 +26,7 @@ class PullWorker:
                 params = deserialize(params_payload)
                 try:
                     result_obj = pool.apply(fn, (params,)) # TODO: Add a try-except-finally block for handling exceptions
+                    print(result_obj)
                     result = serialize(result_obj)
                 except Exception as e:
                     result = serialize(e)
@@ -33,6 +34,8 @@ class PullWorker:
     def _request_task(self, task_string):
         self.socket.send_string(task_string, encoding='utf-8')
         response = self.socket.recv_string(encoding='utf-8')
+        print("Task Received")
+        print(response)
         return response
 
 
