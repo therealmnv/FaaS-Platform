@@ -1,12 +1,11 @@
 import sys
 import json
 import argparse
-import dill
-import codecs
 import zmq
 import multiprocessing as mp # check for threading
 
 from database import *
+from serialize import *
 
 COMPLETE='COMPLETE'
 RUNNING='RUNNING'
@@ -14,12 +13,6 @@ FAILED='FAILED'
 
 redis_client = Redis().get_client()
 
-
-def serialize(obj) -> str:
-    return codecs.encode(dill.dumps(obj), "base64").decode()
-
-def deserialize(obj: str):
-    return dill.loads(codecs.decode(obj.encode(), "base64"))
 
 class LocalDispatcher:
     def __init__(self, num_worker_processors):
@@ -31,25 +24,34 @@ class LocalDispatcher:
 
         with mp.Pool(processes=self.num_worker_processors) as pool:
             while True:
-                task_id = pubsub.get_message()
-                task_data = redis_client.hget('tasks', task_id)      
-                task = json.loads(task_data)  
+                task = pubsub.get_message()
+                if task is None or task['type'] != 'message':
+                    continue
+                task_id = task['data']
+                task_data = redis_client.hget('tasks', task_id) 
+                if task_data is None:
+                    continue
 
-                fn_payload = task["function_payload"]
-                param_payload = task["param_payload"]
-                pool.apply_async(self._execute_task, (task_id, task, fn_payload, param_payload,))
+                pool.apply_async(self._execute_task, (task_id, task_data,))
 
 
-    def _execute_task(self, task_id, task, fn_payload, param_payload):
+    def _execute_task(self, task_id, task_data):
+
+        task = json.loads(task_data)  
+        fn_payload = task["function_payload"]
+        param_payload = task["param_payload"]
+        print("function payload", fn_payload, flush=True)
+        print("param payload", param_payload, flush=True)
   
         task["status"] = RUNNING
+        print(task, flush=True)
         task_data = json.dumps(task)
         redis_client.hset('tasks', task_id, task_data)
 
         fn = deserialize(fn_payload)
         param = deserialize(param_payload)
 
-        result = fn(*param)
+        result = fn(param)
         result_payload = serialize(result)
 
         task['status'] = COMPLETE

@@ -3,13 +3,19 @@ from api_utils import *
 from database import *
 import json
 import uuid
+from serialize import deserialize
 
 app = FastAPI()
 redis_client = Redis().get_client()
 
+
 @app.post("/register_function", response_model=RegisterFnRep)
 def register_function(input: RegisterFn):
     function_id = uuid.uuid4()
+    try:
+        deserialize(input.payload)
+    except:
+        raise HTTPException(status_code=400, detail="Function not serialized")
     data = {
         "function_name": input.name,
         "function_payload": input.payload,
@@ -47,13 +53,15 @@ def get_status(task_id: str):
 @app.get('/result/{task_id}', response_model=TaskResultRep)
 def get_result(task_id: str):
     task_data = redis_client.hget("tasks", task_id)
+    print(task_data)
     if not task_data:
         raise HTTPException(status_code=404, detail="Task not found")
     
     task_data = json.loads(task_data)
     result = task_data["result"]
 
+    '''
     if result is None:
-        raise HTTPException(status_code=400, detail="Result not available yet")
-    
+        raise HTTPException(status_code=200, detail="Result not available yet", items = {"task_id" : "crap"})
+    '''
     return TaskResultRep(task_id=task_id, status=task_data["status"], result=str(result))
