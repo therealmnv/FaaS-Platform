@@ -60,8 +60,4 @@ def get_result(task_id: str):
     task_data = json.loads(task_data)
     result = task_data["result"]
 
-    '''
-    if result is None:
-        raise HTTPException(status_code=200, detail="Result not available yet")
-    '''
     return TaskResultRep(task_id=task_id, status=task_data["status"], result=str(result))

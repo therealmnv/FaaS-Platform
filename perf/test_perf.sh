@@ -7,7 +7,7 @@ array_length=${#workers[@]}
 worker_mode=$1
 echo $worker_mode
 
-port="3014"
+port="3015"
 url="127.0.0.1"
 
 # You need to open up uvicorn main:app !
