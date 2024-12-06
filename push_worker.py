@@ -23,7 +23,7 @@ def run():
                 pool.apply_async(_execute_function, args=(task_id, task_data))
             if not result_queue.empty():
                 res = result_queue.get()
-                _send_result(*(result_queue.get()))
+                _send_result(*res)
             time.sleep(.1)
                 
 def _send_heartbeat():
@@ -46,8 +46,10 @@ def _execute_function(task_id, task_data):
     fn = deserialize(fn_payload)
     params = deserialize(params_payload)
 
+    args, kwargs = params
+
     try:
-        result_obj = fn(*params)
+        result_obj = fn(*args, **kwargs)
         result = serialize(result_obj)
 
     except Exception as e:
@@ -59,6 +61,7 @@ def _execute_function(task_id, task_data):
     
 def _send_result(task_id, task_result):
     result_message = task_id + "%?%" + task_result
+    print(result_message)
     socket.send_string(result_message)
 
 

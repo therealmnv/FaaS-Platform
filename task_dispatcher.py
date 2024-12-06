@@ -9,7 +9,7 @@ import multiprocessing as mp # check for threading
 from database import *
 from serialize import *
 
-COMPLETE='COMPLETE'
+COMPLETE='COMPLETED'
 RUNNING='RUNNING'
 FAILED='FAILED'
 
@@ -202,8 +202,10 @@ class PushDispatcher:
         while True:
             worker_id, message = self._receive_worker_message()
             if message == "HEARTBEAT":
+                print("New Joiner" , worker_id)
                 self._update_workers(worker_id)
             else:
+                print("GOT SOMETHING!")
                 self._process_result(worker_id, message)
             
             task = pubsub.get_message()
@@ -239,6 +241,9 @@ class PushDispatcher:
     def _process_result(self, worker_id, message):
         task_id, result_data = message.split("%?%")
         task_id = eval(task_id)
+
+        print(task_id)
+        print(result_data)
 
         self.active_workers[worker_id][1].discard(task_id)
         task_data = redis_client.hget('tasks', task_id)
