@@ -19,27 +19,30 @@ class PullWorker:
         context = zmq.Context()
         socket = context.socket(zmq.REQ)
         socket.connect(f"tcp://{self.dispatcher_url}")
-        socket.setsockopt(zmq.RCVTIMEO, 1000)
-        message = "START"
+        socket.setsockopt(zmq.RCVTIMEO, 10000)
 
         while True:
-            socket.send_string(message)
-            try:
-                if message != "START":
-                    message = "START"
-                    print(socket.recv_string())
-                    continue
+            if not self.result_queue.empty():
+                task_data = self.result_queue.get()
+                socket.send_string(task_data)
+                print(f"Worker sent result: {task_data}")
+                ack = socket.recv_string()
+                print(ack)
+                continue
 
+            socket.send_string("START")
+            try:
                 task = socket.recv_string()
 
                 if task == "NO_TASKS":
                     print("No tasks available")
                     time.sleep(1)
-                    continue  # Continue to the next iteration of the while loop
+                    continue
 
                 # Put the task in the queue
                 print(f"Client received task: {task}")
                 self.task_queue.put(task)
+                time.sleep(1)
 
             except zmq.Again as e:
                 print("No task received within timeout")
@@ -50,9 +53,11 @@ class PullWorker:
         while True:
             try:
                 task = self.task_queue.get(timeout=1)
-                task = json.loads(task)
-                fn_payload = task["function_payload"]
-                params_payload = task["param_payload"]
+                task_data, task_id = task.split("%?%")
+
+                task_data = json.loads(task_data)
+                fn_payload = task_data["function_payload"]
+                params_payload = task_data["param_payload"]
 
                 fn = deserialize(fn_payload)
                 params = deserialize(params_payload)
@@ -61,16 +66,20 @@ class PullWorker:
 
                 try:
                     result_obj = fn(*args, **kwargs)
-                    result = serialize(result_obj)
+                    print(result_obj)
+                    task_data["status"] = "COMPLETED"
+                    task_data["result"] = serialize(result_obj)
                     print(f"Task processed successfully: {result_obj}")
 
                 except Exception as e:
-                    result = serialize(e)
+                    task_data["status"] = "FAILED"
+                    task_data["result"] = serialize(e)
                     print(f"Error processing task: {e}")
 
-                self.result_queue.put(result)
+                self.result_queue.put(json.dumps(task_data) + "%?%" + task_id)
 
             except Empty:
+                time.sleep(0.5)
                 continue
 
     def execute(self):
@@ -96,6 +105,7 @@ if __name__ == "__main__":
         description="Pull Worker for FAAS Project"
     )
 
+    # TODO : rearrange
     parser.add_argument("-d", "--dispatcher_url", required=True,
                         type=str,
                         help="Dispatcher's url to interact with task dispatcher")
