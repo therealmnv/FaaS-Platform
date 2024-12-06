@@ -1,62 +1,65 @@
+import time
 import argparse
 import zmq
 import multiprocessing as mp
+
+mp.set_start_method('fork')
+global result_queue
+result_queue = mp.Queue()
+
 import json
 
 from serialize import *
 
 
-class PushWorker:
-    def __init__(self, num_worker_processors, dispatcher_url):
-        self.num_worker_processors = num_worker_processors
-        context = zmq.Context()
-        self.socket = context.socket(zmq.ROUTER)
-        self.socket.connect(f"tcp://{dispatcher_url}")
 
 
-    def run(self):
-        with mp.Pool(processes=self.num_worker_processors) as pool:
-            while True:
-                task_id, task_data = self._receive_task()
-                if id:
-                    pool.apply_async(self._execute_function, ((task_id, task_data),))
-                # self._send_heartbeat()
+def run():
+    with mp.Pool(processes=num_worker_processors) as pool:
+        while True:
+            _send_heartbeat()
+            task_id, task_data = _receive_task()
+            if task_id:
+                pool.apply_async(_execute_function, args=(task_id, task_data))
+            if not result_queue.empty():
+                res = result_queue.get()
+                _send_result(*(result_queue.get()))
+            time.sleep(.1)
                 
+def _send_heartbeat():
+    socket.send_string("HEARTBEAT")
 
+def _receive_task():
+    try:
+        task_message = socket.recv_string(flags=zmq.NOBLOCK)
+        task_id, task_data = task_message.split("%?%")
+        return task_id, task_data
+    except zmq.Again: 
+        return None, None
+        
+def _execute_function(task_id, task_data):
+    global result_queue
+    task_json = json.loads(task_data)
+    fn_payload = task_json["function_payload"]
+    params_payload = task_json["param_payload"]
 
-    def _execute_function(self, task_id, task_data):
-        task_json = json.loads(task_data)
-        fn_payload = task_json["function_payload"]
-        params_payload = task_json["param_payload"]
+    fn = deserialize(fn_payload)
+    params = deserialize(params_payload)
 
-        fn = deserialize(fn_payload)
-        params = deserialize(params_payload)
+    try:
+        result_obj = fn(*params)
+        result = serialize(result_obj)
 
-        try:
-            result_obj = fn(params)
-            result = serialize(result_obj)
+    except Exception as e:
+        result = serialize(e)
 
-        except Exception as e:
-            result = serialize(e)
-
-        finally:
-            self._send_result(task_id, result)
-
-    def _receive_task(self):
-        try:
-            id_bytes, data_bytes = self.socket.recv_multipart(flags=zmq.NOBLOCK)
-            task_id = id_bytes.decode('utf-8')
-            task_data = data_bytes.decode('utf-8')
-            return task_id, task_data
-
-        except zmq.Again:
-            return None, None
+    finally:
+        result_queue.put([task_id, result])
 
     
-    def _send_result(self, task_id, task_result):
-        id_bytes = task_id.encode('utf-8')
-        result_bytes = task_result.encode('utf-8')
-        self.socket.send_multipart([id_bytes, result_bytes])
+def _send_result(task_id, task_result):
+    result_message = task_id + "%?%" + task_result
+    socket.send_string(result_message)
 
 
 
@@ -66,15 +69,19 @@ if __name__ == "__main__":
                         prog="push_worker",
                         description="Push Worker for FAAS Project")
     
-    parser.add_argument("-p", "--port", required=True,
-                        type=int,
-                        help="Port to interact with task dispatcher")
-    
     parser.add_argument("-w", "--num_worker_processors", required=True,
                         type=int,
                         help="Number of worker processors for worker")
 
+    parser.add_argument("-d", "--dispatcher_url", required=True,
+                        type=str,
+                        help="Dispatcher's url to interact with task dispatcher")
+    
     args = parser.parse_args()
+    
+    num_worker_processors = args.num_worker_processors
+    context = zmq.Context()
+    socket = context.socket(zmq.DEALER)
+    socket.connect(f"tcp://{args.dispatcher_url}")
 
-    workers = PushWorker(args.num_worker_processors, args.dispatcher_url)
-    workers.run()
+    run()

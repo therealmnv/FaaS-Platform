@@ -1,4 +1,4 @@
-import concurrent.futures
+import random
 import sys
 import json
 import time
@@ -134,54 +134,77 @@ class PushDispatcher:
         self.port = port
         context = zmq.Context()
         self.socket = context.socket(zmq.ROUTER)
-        self.socket.bind(f"tcp://127.0.0.1:{port}")
+        self.socket.bind(f"tcp://*:{port}")
+
+        self.timeout = 120
+        self.active_workers = dict()
 
     def run(self):
         pubsub = redis_client.pubsub()
         pubsub.subscribe('tasks')
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            while True:
-                task = pubsub.get_message()
-                if task and task['type'] == 'message':
-                    task_id = task['data']
-                    task_data = redis_client.hget('tasks', task_id)
-                    if task_data:
-                        self._send_task(task_id, task_data)
-                self._receive_result(executor)
+        while True:
+            worker_id, message = self._receive_worker_message()
+            if message == "HEARTBEAT":
+                self._update_workers(worker_id)
+            else:
+                self._process_result(worker_id, message)
+            
+            task = pubsub.get_message()
+            if task and task['type'] == 'message':
+                task_id = task['data']
+                task_data = redis_client.hget('tasks', task_id)
+                if task_data:
+                    self._send_task(task_id, task_data)
+
+    def _receive_worker_message(self):
+        worker_id_bytes, message_data = self.socket.recv_multipart()
+        worker_id = str(worker_id_bytes)
+        if worker_id not in self.active_workers:
+            self.active_workers[worker_id] = [time.time(), set()]
+
+        message = message_data.decode()
+        return worker_id, message
+
+    def _update_workers(self, worker_id):
+        check_time = time.time()
+        self.active_workers[worker_id][0] = check_time
+        for worker_id, (last_time, task_ids) in list(self.active_workers.items()):
+            if (check_time - last_time) > self.timeout:
+                del self.active_workers[worker_id]
+                for task_id in task_ids:
+                    task_data = redis_client.hget("tasks", task_id)
+                    task = json.loads(task_data)
+                    task["status"] = FAILED
+                    task_data = json.dumps(task)
+                    redis_client.hset('tasks', task_id, task_data)
+
+
+    def _process_result(self, worker_id, message):
+        task_id, result_data = message.split("%?%")
+        task_id = eval(task_id)
+
+        self.active_workers[worker_id][1].discard(task_id)
+        task_data = redis_client.hget('tasks', task_id)
+        task = json.loads(task_data)
+        if deserialize(result_data) == Exception:
+            task["status"] = FAILED
+        else:
+            task["status"] = COMPLETE
+        task['result'] = result_data
+        task_data = json.dumps(task)  
+
+        redis_client.hset('tasks', task_id, task_data)
+
 
     def _send_task(self, task_id, task_data):
+        worker_id = random.choice(tuple(self.active_workers))
         task = json.loads(task_data)
         task["status"] = RUNNING
         task_data = json.dumps(task)
-
-        print(task)
-
         redis_client.hset('tasks', task_id, task_data)
-        self.socket.send_string(task_id)
-        #self.socket.send_multipart([task_id, task_data.encode()])
-        print("SENT!")
 
-    def _get_results(self):
-        return self.socket.recv_multipart()
-
-    def _receive_result(self, executor):
-            future = executor.submit(self._get_results)
-            try:
-                [id_bytes, data_bytes] = future.result(timeout=1)
-                task_id = id_bytes.decode('utf-8')
-                task_data = data_bytes.decode('utf-8')
-                task = json.loads(task_data)
-
-                if deserialize(task['result']) is Exception:
-                    task["status"] = FAILED    
-                else:
-                    task["status"] = COMPLETE
-
-                task_data = json.dumps(task)
-
-                redis_client.hset('tasks', task_id, task_data)
-            except concurrent.futures.TimeoutError:
-                return
+        message_data = str(task_id) + "%?%" + str(task_data)
+        self.socket.send_multipart([eval(worker_id), message_data.encode()])
 
 
 if __name__ == "__main__":
