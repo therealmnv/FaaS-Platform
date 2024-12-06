@@ -82,7 +82,6 @@ def test_roundtrip():
 
         assert resp.status_code == 200
         assert resp.json()["task_id"] == task_id
-        logger.info("hello?!?!?!?")
         logger.warning(resp.json())
         if resp.json()['status'] in ["COMPLETED", "FAILED"]:
             logger.warning(f"Task is now in {resp.json()['status']}")
