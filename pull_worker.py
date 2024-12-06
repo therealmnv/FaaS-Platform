@@ -2,41 +2,60 @@ import argparse
 import zmq
 import zmq.asyncio
 import multiprocessing as mp
-from queue import Queue
-import time
+from multiprocessing import Queue
 import asyncio
+import threading
 
 from serialize import *
-
 
 class PullWorker:
     def __init__(self, num_worker_processors, dispatcher_url):
         self.num_worker_processors = num_worker_processors
         self.free_workers = num_worker_processors
 
-        self.context = zmq.asyncio.Context()
-        self.socket = self.context.socket(zmq.REQ)
-        self.socket.connect(f"tcp://{dispatcher_url}")
+        # Store parameters separately to avoid pickling ZeroMQ context
+        self.dispatcher_url = dispatcher_url
+        
+        # Thread-safe queues for communication between processes
+        self.task_queue = mp.Queue()
+        self.result_queue = mp.Queue()
+        
+        # Synchronization primitives
+        self.stop_event = mp.Event()
 
-        self.poller = zmq.asyncio.Poller()
-        self.poller.register(self.socket, zmq.POLLIN)
+    @staticmethod
+    def worker_process(dispatcher_url, task_queue, result_queue, stop_event):
+        """
+        Static worker function to be run in separate processes.
+        Uses standard ZeroMQ socket for communicating with dispatcher.
+        """
+        # Create ZeroMQ context inside the process
+        context = zmq.Context()
+        socket = context.socket(zmq.REQ)
+        socket.connect(f"tcp://{dispatcher_url}")
 
-        self.task_queue = Queue()
-        self.result_queue = Queue()
-        self.lock = asyncio.Lock()
-        self.lock = mp.Lock()
+        while not stop_event.is_set():
+            try:
+                # Try to get a task with a timeout
+                try:
+                    task = task_queue.get(timeout=1)
+                except Queue.Empty:
+                    continue
 
+                if task is None:  # Sentinel value to stop the worker
+                    break
 
-    def worker(self):
-        while True:
-            task = self.task_queue().get()
-            self.t
-            if task:
-                with self.lock:
-                    self.free_workers -= 1
-                task = self.task_queue().get()
-                fn_payload = task["function_payload"]
-                params_payload = task["param_payload"]
+                # Ensure task is a dictionary with expected keys
+                if not isinstance(task, dict):
+                    print(f"Invalid task format: {task}")
+                    continue
+
+                fn_payload = task.get("function_payload")
+                params_payload = task.get("param_payload")
+
+                if fn_payload is None or params_payload is None:
+                    print(f"Missing payload in task: {task}")
+                    continue
 
                 fn = deserialize(fn_payload)
                 params = deserialize(params_payload)
@@ -44,122 +63,120 @@ class PullWorker:
                 try:
                     result_obj = fn(params)
                     result = serialize(result_obj)
-
                 except Exception as e:
                     result = serialize(str(e))
 
-                finally:
-                    self.result_queue.put(result)
-                    with self.lock:
-                        self.free_workers += 1
+                # Put result in the result queue
+                result_queue.put(result)
+
+            except Exception as e:
+                print(f"Worker process error: {e}")
+
+        # Clean up ZeroMQ resources
+        socket.close()
+        context.term()
 
     async def async_server_communication(self):
-        while True:
-            try:
-                if self.check_condition():
-                    print("HI")
-                    await self.socket.send_string("START")
+        """
+        Async method to handle communication with the dispatcher.
+        Uses asyncio ZeroMQ for non-blocking communication.
+        """
+        context = zmq.asyncio.Context()
+        socket = context.socket(zmq.REQ)
+        socket.connect(f"tcp://{self.dispatcher_url}")
 
-                    # Poll with a 0.01 second timeout (using asyncio)
-                    socks = dict(await self.poller.poll(10))
+        poller = zmq.asyncio.Poller()
+        poller.register(socket, zmq.POLLIN)
+
+        try:
+            while not self.stop_event.is_set():
+                try:
+                    # Check if we have free workers and can request a task
+                    if self.free_workers > 0:
+                        await socket.send_string("START")
+
+                        # Poll with a timeout
+                        socks = dict(await poller.poll(10))
+                        
+                        if socket in socks and socks[socket] == zmq.POLLIN:
+                            task_str = await socket.recv_string()
+
+                            if task_str == "NO_TASKS":
+                                print("No tasks available")
+                                await asyncio.sleep(1)
+                                continue
+                            
+                            # Parse task string into a dictionary
+                            try:
+                                task = eval(task_str)  # Be cautious with eval
+                                if isinstance(task, dict):
+                                    self.task_queue.put(task)
+                                    self.free_workers -= 1
+                                else:
+                                    print(f"Invalid task format: {task_str}")
+                            except Exception as e:
+                                print(f"Error parsing task: {e}")
+
+                            # Check if we have a result to send back
+                            if not self.result_queue.empty():
+                                result = self.result_queue.get()
+                                await socket.send_string(f"RESULT:{result}")
+                                self.free_workers += 1
+
+                                # Wait for server acknowledgment
+                                await socket.recv_string()
                     
-                    if self.socket in socks and socks[self.socket] == zmq.POLLIN:
-                        task = await self.socket.recv_string()
+                    await asyncio.sleep(0.5)
 
-                        if task == "NO_TASKS":
-                            print("No tasks available")
-                            await asyncio.sleep(1)  # Use asyncio.sleep() instead of time.sleep()
-                            continue
-                        
-                        # Process task (simulated work)
-                        print(f"Client processing task: {task}")
-                        await self.task_queue.put(task)
-                        
-                        # Send result back to server
-                        if not self.result_queue.empty():
-                            result = self.result_queue.get()
-                            self.socket.send_string(f"RESULT:{result}")
-                            self.result_queue.task_done()
-                        
-                        # Wait for server response to complete REQ-REP cycle
-                        await self.socket.recv_string()
-                    else:
-                        print("No task received within timeout")
-                
-                # Avoid tight polling loop
-                await asyncio.sleep(0.5)
-            
-            except Exception as e:
-                print(f"Client error: {e}")
-                break
+                except Exception as e:
+                    print(f"Async communication error: {e}")
+                    break
 
-    def run_workers(self):
+        finally:
+            socket.close()
+            context.term()
+
+    def run(self):
+        """
+        Main method to start worker processes and async communication.
+        """
+        # Create and start worker processes
         processes = []
         for _ in range(self.num_worker_processors):
-            process = mp.Process(target=self.worker)
+            process = mp.Process(
+                target=self.worker_process, 
+                args=(
+                    self.dispatcher_url, 
+                    self.task_queue, 
+                    self.result_queue, 
+                    self.stop_event
+                )
+            )
             processes.append(process)
             process.start()
 
-        for process in processes:
-            process.join()
-
-    async def run(self):
-        communication = self.async_server_communication()
-        self.run_workers()
-        await communication
-
-    def check_condition(self):
-        # This should be the actual condition for sending "START"
-        with self.lock:
-            if self.free_workers > 0:
-                return True
-            else:
-                return False
-    
-
-    # def run(self):
-    #     result = "START" # Perhaps an indicator of 'Worker is on'
-    #     with mp.Pool(processes=self.num_worker_processors) as pool:
-    #         while True:
-    #             task_data = self._request_task(result) # TODO: We must reset the result to "START" after an iteration in the while True? Otherwise it wouldn't request a task after the 1st iteration
-    #             task_json = json.loads(task_data)
-    #             fn_payload = task_json["function_payload"]
-    #             params_payload = task_json["param_payload"]
-
-    #             fn = deserialize(fn_payload)
-    #             params = deserialize(params_payload)
-    #             try:
-    #                 result_obj = pool.apply(fn, (params,)) # TODO: Add a try-except-finally block for handling exceptions
-    #                 print(result_obj)
-    #                 result = serialize(result_obj)
-    #             except Exception as e:
-    #                 result = serialize(e)
-
-    # def _request_task(self, task_string):
-    #     self.socket.send_string(task_string, encoding='utf-8')
-    #     response = self.socket.recv_string(encoding='utf-8')
-    #     print("Task Received")
-    #     print(response)
-    #     return response
-    
-    # def _execute(self, task_queue, process_id, num_worker_processors):
-    #     while True:
-    #         self.socket.send_string("START")
-    #         task = self.socket.recv_string()
-    #         if not task:
-    #             self.socket.send_string(" ")
-    #             time.sleep(1)
-    #             continue
-    #         function(task)
+        try:
+            # Run async communication
+            asyncio.run(self.async_server_communication())
+        except KeyboardInterrupt:
+            print("Stopping workers...")
+        finally:
+            # Signal workers to stop
+            self.stop_event.set()
             
-
-
+            # Put sentinel values in task queue to stop workers
+            for _ in range(self.num_worker_processors):
+                self.task_queue.put(None)
+            
+            # Wait for all processes to finish
+            for process in processes:
+                process.join()
 
 if __name__ == "__main__":
-
     parser = argparse.ArgumentParser(
-                        prog="pull_worker",
-                        description="Pull Worker for FAAS Project")
+        prog="pull_worker",
+        description="Pull Worker for FAAS Project"
+    )
     
     parser.add_argument("-d", "--dispatcher_url", required=True,
                         type=str,
@@ -171,5 +188,8 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    # Use spawn method for multiprocessing on Windows
+    mp.set_start_method('spawn')
+
     workers = PullWorker(args.num_worker_processors, args.dispatcher_url)
-    asyncio.run(workers.run())
+    workers.run()
