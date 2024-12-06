@@ -106,6 +106,7 @@ class PullDispatcher:
                     task_data, task_id = message.split("%?%")
                     print("received: ", type(task_data), task_id)
 
+                    task_id = eval(task_id)
                     task_data = json.loads(task_data)
 
                     redis_client.hset('tasks', task_id, json.dumps(task_data))
