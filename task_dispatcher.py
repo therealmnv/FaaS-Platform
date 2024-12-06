@@ -72,52 +72,36 @@ class PullDispatcher:
         context = zmq.Context()
         self.socket = context.socket(zmq.REP)
         self.socket.bind(f"tcp://127.0.0.1:{port}")
-        self.timeout = 120
 
     def run(self):
         pubsub = redis_client.pubsub()
         pubsub.subscribe('tasks')
-        task_id = None
-        start_time = None
 
-        self.socket.recv_string()  # Start loop
-        while True:
-            task = pubsub.get_message()
-            if task is None or task['type'] != 'message':
-                continue
-            task_id = task['data']
-            task_data = redis_client.hget('tasks', task_id)
-            if task_data is None:
-                continue
-            self._send_task(task_id, task_data)
-            start_time = time.time()
-            self._receive_result(task_id, task_data, start_time)
-
-    def _receive_result(self, task_id, task_data, start_time):
-        result_data = self._receive_string(start_time)
-
-        task_json = json.loads(task_data)
-        
-        if result_data is None:
-            task_json["status"] = FAILED
-        else:
-            task_json["status"] = COMPLETE
-            task_json["result"] = result_data
-
-        task_data = json.dumps(task_json)
-
-        redis_client.hset('tasks', task_id, task_data)
-
-    def _receive_string(self, start_time):
+        print("Server started. Waiting for START requests...")
         while True:
             try:
-                string = self.socket.recv_string(flags=zmq.NOBLOCK)
-                print("STRING", string)
-                return string
-            except zmq.Again:
-                if start_time and (time.time() - start_time) > self.timeout:
-                    return None
-
+                message = self.socket.recv_string()
+                
+                if message == "START":
+                    # Check if tasks are available
+                    task = pubsub.get_message()
+                    if task is None or task['type'] != 'message':
+                        # No tasks available
+                        print("No tasks available")
+                        self.socket.send_string("NO_TASKS")
+                    else:
+                        task_id = task['data']
+                        task_data = redis_client.hget('tasks', task_id) 
+                        self.socket.send_string(task_data)
+                        
+                else:
+                    # Receive task result
+                    print(f"Server received result: {message}")
+                    self.socket.send_string("RESULT_RECEIVED")
+            
+            except Exception as e:
+                print(f"Server error: {e}")
+                break
         
     def _send_task(self, task_id, task_data):
         print(task_data)
