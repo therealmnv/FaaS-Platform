@@ -22,14 +22,15 @@ def push_graph():
 
 def pull_graph():
     pull_data = [
-        [ 1, 0.05316281318664551],
-        [ 5, 0.0624079704284668],
-        [10, 0.12756609916687012],
-        [20, 0.25497007369995117],
-        [40, 0.4865279197692871],
+        [1, 1, 0.058979034423828125],
+        [1, 5, 0.06356978416442871],
+        [2, 10, 0.10510826110839844],
+        [4, 20, 0.11581587791442871],
+        [8, 40, 0.23066186904907227],
     ]
-    tasks = [str(el[0]) for el in pull_data]
-    times = [el[1] for el in pull_data]
+    tasks = [str((el[0], el[1],)) for el in pull_data]
+    times = [el[2] for el in pull_data]
+    
     plt.bar(tasks, times)
     plt.title("Pull Graph Scaling Study")
     plt.xlabel("Number of Tasks")
