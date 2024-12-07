@@ -4,7 +4,7 @@ import json
 import time
 import argparse
 import zmq
-import multiprocessing as mp # check for threading
+import multiprocessing as mp
 from datetime import datetime, timedelta
 
 from database import *
@@ -16,12 +16,9 @@ FAILED='FAILED'
 
 redis_client = Redis().get_client()
 
-
-
 mp.set_start_method('fork')
 global result_queue
 result_queue = mp.Queue()
-
 task_queue = mp.Queue()
 
 def local_run(num_worker_processors):
