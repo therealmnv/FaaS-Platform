@@ -26,7 +26,9 @@ The pull worker is interacting with the task dispatcher using a REQ/REP format i
 
 The pull worker also uses Queues to load up on work and also start shipping it back. The queues are important since we may work on multiple tasks at once but there is a fixed back and forth communication style to the REQ/REP.
 
-[LIMITATIONS]
+[LIMITATIONS] The pull workers are limited by a single REQ-REP socket connection. ZMQ internally handles the synchronization of requests and may cause blocking in case we use the same port for hundreds of processors. 
+
+[NOTE] We also tried an architecture where we have multiple processors in a worker making an individual connection to the dispatcher but that was bad for scaling horizontally because the number of processors having a socket connection to the dispatcher increase exponentially. 
 
 ## Push Workers
 
