@@ -51,16 +51,20 @@ def _execute_function(task_id, task_data):
     try:
         result_obj = fn(*args, **kwargs)
         result = serialize(result_obj)
+        status = "COMPLETED"
 
     except Exception as e:
         result = serialize(e)
+        status = "FAILED"
 
-    finally:
-        result_queue.put([task_id, result])
+    task_json['result'] = result
+    task_json['status'] = status
+    task_data = json.dumps(task_json)
+    result_queue.put([task_id, task_data])
 
     
-def _send_result(task_id, task_result):
-    result_message = task_id + "%?%" + task_result
+def _send_result(task_id, task_data):
+    result_message = task_id + "%?%" + task_data
     print(result_message)
     socket.send_string(result_message)
 

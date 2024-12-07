@@ -162,10 +162,8 @@ class PushDispatcher:
         while True:
             worker_id, message = self._receive_worker_message()
             if message == "HEARTBEAT":
-                print("New Joiner" , worker_id)
                 self._update_workers(worker_id)
             else:
-                print("GOT SOMETHING!")
                 self._process_result(worker_id, message)
             
             task = pubsub.get_message()
