@@ -116,6 +116,7 @@ class PullDispatcher:
                         self.task_deadlines[task_id] = datetime.now() + timedelta(seconds=self.timeout)
                         self.socket.send_string(task_data + "%?%" + str(task_id))
                         print(f"Server sent task {task_id}: {task_data}")
+                        del self.task_deadlines[task_id]
                 
                 else:
                     task_data, task_id = message.split("%?%")
