@@ -199,22 +199,9 @@ class PushDispatcher:
 
 
     def _process_result(self, worker_id, message):
-        task_id, result_data = message.split("%?%")
+        task_id, task_data = message.split("%?%")
         task_id = eval(task_id)
-
-        print(task_id)
-        print(result_data)
-
         self.active_workers[worker_id][1].discard(task_id)
-        task_data = redis_client.hget('tasks', task_id)
-        task = json.loads(task_data)
-        if deserialize(result_data) == Exception:
-            task["status"] = FAILED
-        else:
-            task["status"] = COMPLETE
-        task['result'] = result_data
-        task_data = json.dumps(task)  
-
         redis_client.hset('tasks', task_id, task_data)
 
 
