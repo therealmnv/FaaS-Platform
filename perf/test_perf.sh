@@ -16,7 +16,7 @@ if [[ "$worker_mode" == "push" ]]; then
         echo $item
         for ((j=0; j < ${item}; j++)); do
             echo $dispatcher_url
-            python3 push_worker.py -w 5 -d $dispatcher_url &    
+            python3 push_worker.py 5 "$dispatcher_url" &    
         done
         echo ${jobs[$i]}
         python3 perf/perf.py $worker_mode ${jobs[$i]} 
@@ -31,7 +31,7 @@ elif [[ "$worker_mode" == "pull" ]]; then
         echo $item
         for ((j=0; j < ${item}; j++)); do
             echo $dispatcher_url
-            python3 pull_worker.py -w 5 -d $dispatcher_url &    
+            python3 pull_worker.py 5 "$dispatcher_url" &    
         done
         echo ${jobs[$i]}
         python3 perf/perf.py $worker_mode ${jobs[$i]} 

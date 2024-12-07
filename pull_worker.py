@@ -106,14 +106,13 @@ if __name__ == "__main__":
         description="Pull Worker for FAAS Project"
     )
 
-    # TODO : rearrange
-    parser.add_argument("-d", "--dispatcher_url", required=True,
-                        type=str,
-                        help="Dispatcher's url to interact with task dispatcher")
-
-    parser.add_argument("-w", "--num_worker_processors", required=True,
+    parser.add_argument("num_worker_processors",
                         type=int,
                         help="Number of worker processors for worker")
+
+    parser.add_argument("dispatcher_url",
+                        type=str,
+                        help="Dispatcher's url to interact with task dispatcher")
 
     args = parser.parse_args()
 
