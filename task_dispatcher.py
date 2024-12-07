@@ -17,53 +17,70 @@ FAILED='FAILED'
 redis_client = Redis().get_client()
 
 
-class LocalDispatcher:
-    def __init__(self, num_worker_processors):
-        self.num_worker_processors = num_worker_processors
-    
-    def run(self):
-        pubsub = redis_client.pubsub()
-        pubsub.subscribe('tasks')
 
-        with mp.Pool(processes=self.num_worker_processors) as pool:
-            while True:
+mp.set_start_method('fork')
+global result_queue
+result_queue = mp.Queue()
+
+task_queue = mp.Queue()
+
+def local_run(num_worker_processors):
+    pubsub = redis_client.pubsub()
+    pubsub.subscribe('tasks')
+
+    with mp.Pool(processes=num_worker_processors) as pool:
+        while True:
+            if task_queue.empty():
                 task = pubsub.get_message()
-                if task is None or task['type'] != 'message':
-                    continue
-                task_id = task['data']
-                task_data = redis_client.hget('tasks', task_id) 
-                if task_data is None:
-                    continue
+                if task and task['type'] == 'message':
+                    task_id = task['data']
+                    task_data = redis_client.hget('tasks', task_id)
+                    if task_data:
+                        task_queue.put([task_id, task_data])
 
-                pool.apply_async(self._execute_task, (task_id, task_data,))
+            if not task_queue.empty() :
+                task_id, task_data  = task_queue.get()
+                task = json.loads(task_data)  
+                task["status"] = RUNNING
+                task_data = json.dumps(task)  
+                redis_client.hset('tasks', task_id, task_data)
 
+                pool.apply_async(_execute_task, (task_id, task_data,))
+            if not result_queue.empty():
+                task_id, task_data = result_queue.get()
+                print("Hello!?!?!?!")
+                print(task_id, task_data)
+                redis_client.hset('tasks', task_id, task_data)
+    
+    
+def _execute_task(task_id, task_data):
+    global result_queue
 
-    def _execute_task(self, task_id, task_data):
+    task = json.loads(task_data)  
 
-        task = json.loads(task_data)  
-        fn_payload = task["function_payload"]
-        params_payload = task["param_payload"]
-  
-        task["status"] = RUNNING
+    fn = deserialize(task["function_payload"])
+    params = deserialize(task["param_payload"])
+
+    args, kwargs = params
+
+    print("RUNNING!!")
+
+    try:
+        result = fn(*args, **kwargs)
+        result_payload = serialize(result)
+        status = COMPLETE
+
+    except Exception as e:
+        result_payload = serialize(e)
+        status = FAILED
+
+    finally:
+
+        task['status'] = status
+        task['result'] = result_payload
         task_data = json.dumps(task)
-        redis_client.hset('tasks', task_id, task_data)
 
-        fn = deserialize(fn_payload)
-        params = deserialize(params_payload)
-
-        try:
-            result = fn(params)
-            result_payload = serialize(result)
-            task['status'] = COMPLETE
-
-        except Exception as e:
-            result_payload = serialize(e)
-            task['status'] = FAILED
-
-        finally:
-            task['result'] = result_payload
-            task_data = json.dumps(task)
-            redis_client.hset('tasks', task_id, task_data)
+        result_queue.put([task_id, task_data])
 
 
 class PullDispatcher:
@@ -233,11 +250,10 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     if args.mode == "local":
-        dispatcher = LocalDispatcher(args.num_worker_processors)
+        local_run(args.num_worker_processors)
     else:
         if args.mode == "pull":
             dispatcher = PullDispatcher(args.port)
         else:
             dispatcher = PushDispatcher(args.port)
-
-    dispatcher.run()
+        dispatcher.run()

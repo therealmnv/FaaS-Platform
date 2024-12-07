@@ -3,7 +3,6 @@ import requests
 from serialize import serialize, deserialize
 import time
 
-
 base_url = "http://127.0.0.1:8000/"
 
 valid_statuses = ["QUEUED", "RUNNING", "COMPLETED", "FAILED"]
@@ -14,7 +13,7 @@ def instant():
 def perf():
     return 1
 
-def run_function(n_tasks):
+def run_function(mode, n_tasks):
 
     tasks = set()
 
@@ -41,11 +40,11 @@ def run_function(n_tasks):
 
     diff = time.time() - start
     with open("perf/perf.txt", "a") as f:
-        f.write(str(diff) + "\n")
+        f.write(mode + " : " + str(n_tasks) + " : " + str(diff) + "\n")
 
     print('DONE!')
 
 
 if __name__ == "__main__":
     print(sys.argv)
-    run_function(int(sys.argv[2]))
+    run_function(sys.argv[1], int(sys.argv[2]))

@@ -47,14 +47,12 @@ def test_execute_fn():
                          json={"function_id": fn_info['function_id'],
                                "payload": serialize(((2,), {}))})
 
-    print(resp)
     assert resp.status_code == 200 or resp.status_code == 201
     assert "task_id" in resp.json()
 
     task_id = resp.json()["task_id"]
 
     resp = requests.get(f"{base_url}status/{task_id}")
-    print(resp.json())
     assert resp.status_code == 200
     assert resp.json()["task_id"] == task_id
     assert resp.json()["status"] in valid_statuses
