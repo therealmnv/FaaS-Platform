@@ -18,7 +18,7 @@ sh perf/test_perf.sh local 0
 
 The results will be written to the `perf.txt` file. However, we have a nice graph to display what we found!
 
-!["Local Performance Graph"](perf/local_perf.png)
+!["Local Performance Graph"](../perf/local_perf.png)
 
 From the graph we observe there is extremely low latency for the local worker as it does not need to commununicate over zmq at all. This is of course very nice if you need something simple done really quick that you can't do for some reason on your own computer!
 
@@ -40,7 +40,7 @@ sh perf/test_perf.sh pull <dispatcher_url>
 
 The results will be written to the `perf.txt` file. However, we have a nice graph to display what we found!
 
-!["Pull Performance Graph"](perf/pull_perf.png)
+!["Pull Performance Graph"](../perf/pull_perf.png)
 
 From the graph we see
 
@@ -60,7 +60,7 @@ sh perf/test_perf.sh push <dispatcher_url>
 
 The results will be written to the `perf.txt` file. However, we have a nice graph to display what we found!
 
-!["Push Performance Graph"](perf/push_perf.png)
+!["Push Performance Graph"](../perf/push_perf.png)
 
 From the graph we see that we have an increase in latency in comparison to the local worker [what about pull] but we have great scaling and the ability to server more tasks at once due to the ability to scale out with numerous Push Workers ready to take in work.
 
