@@ -36,23 +36,24 @@ class PullWorker:
 
                 if task == "NO_TASKS":
                     print("No tasks available")
-                    time.sleep(1)
+                    time.sleep(0.01)
                     continue
 
                 # Put the task in the queue
                 print(f"Client received task: {task}")
                 self.task_queue.put(task)
-                time.sleep(1)
+                time.sleep(0.01)
 
             except zmq.Again as e:
                 print("No task received within timeout")
-                time.sleep(1)
+                time.sleep(5)
                 continue
 
     def process_task(self):
         while True:
             try:
                 task = self.task_queue.get(timeout=1)
+                print("Processing task...")
                 task_data, task_id = task.split("%?%")
 
                 task_data = json.loads(task_data)
