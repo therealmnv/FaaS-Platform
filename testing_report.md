@@ -30,8 +30,7 @@ We used the following approach to test our FaaS project:
 1. **Function Registration Tests**:
     - We tested the registration of functions using both valid and invalid payloads (unserialized payload) to ensure that the system correctly handles these scenarios.
 
-    ```
-    python
+    ```python
     def test_fn_registration_invalid():
         # Using a non-serialized payload data
         resp = requests.post(base_url + "register_function",
